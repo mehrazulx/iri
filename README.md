@@ -37,3 +37,4 @@ Deployment is automated via GitHub Actions on:
 
 - / - Hello World message
 - /health - Health check endpoint
+# CI/CD Pipeline Ready
