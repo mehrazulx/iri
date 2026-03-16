@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.1"
+    }
   }
 }
 
@@ -21,12 +25,17 @@ data "aws_vpc" "existing" {
   id = "vpc-0bbaf304115927943"  # Your existing hello-world-app-vpc
 }
 
-# Get existing subnets or create new ones
+# Get existing subnets
 data "aws_subnets" "existing" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.existing.id]
   }
+}
+
+# Get existing route tables
+data "aws_route_tables" "existing" {
+  vpc_id = data.aws_vpc.existing.id
 }
 
 # Create subnets only if none exist
@@ -57,7 +66,7 @@ data "aws_internet_gateway" "existing" {
 }
 
 resource "aws_internet_gateway" "main" {
-  count  = length(data.aws_internet_gateway.existing.id) == 0 ? 1 : 0
+  count  = data.aws_internet_gateway.existing.id != null ? 0 : 1
   vpc_id = data.aws_vpc.existing.id
 
   tags = {
@@ -65,13 +74,14 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# Route Table
+# Only create route table if we created new subnets
 resource "aws_route_table" "public" {
+  count  = length(data.aws_subnets.existing.ids) == 0 ? 1 : 0
   vpc_id = data.aws_vpc.existing.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = length(data.aws_internet_gateway.existing.id) > 0 ? data.aws_internet_gateway.existing.id : aws_internet_gateway.main[0].id
+    gateway_id = data.aws_internet_gateway.existing.id != null ? data.aws_internet_gateway.existing.id : aws_internet_gateway.main[0].id
   }
 
   tags = {
@@ -79,11 +89,11 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Route Table Association
+# Only create route table associations if we created new subnets
 resource "aws_route_table_association" "public" {
-  count          = length(local.subnet_ids)
-  subnet_id      = local.subnet_ids[count.index]
-  route_table_id = aws_route_table.public.id
+  count          = length(data.aws_subnets.existing.ids) == 0 ? length(aws_subnet.public) : 0
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public[0].id
 }
 
 # Security Group for ALB
@@ -296,4 +306,3 @@ resource "aws_cloudwatch_log_group" "ecs" {
 data "aws_availability_zones" "available" {
   state = "available"
 }
-
