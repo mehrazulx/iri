@@ -4,10 +4,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.1"
-    }
   }
 }
 
@@ -15,294 +11,147 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Random suffix to avoid naming conflicts
-resource "random_id" "suffix" {
-  byte_length = 4
-}
-
-# Use existing VPC instead of creating new one
+# VPC
 data "aws_vpc" "existing" {
-  id = "vpc-0bbaf304115927943"  # Your existing hello-world-app-vpc
+  id = "vpc-081707759833234e4"
 }
 
-# Get existing subnets
-data "aws_subnets" "existing" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.existing.id]
-  }
+
+
+#Public Subnet 1
+data "aws_subnet" "existing_public" {
+    id = "subnet-05a73c3c852dc2951"
 }
 
-# Get existing route tables
-data "aws_route_tables" "existing" {
-  vpc_id = data.aws_vpc.existing.id
+#Public Subnet 2
+data "aws_subnet" "existing_public_2" {
+    id = "subnet-0b9ac58d76f700bb6"
 }
 
-# Create subnets only if none exist
-resource "aws_subnet" "public" {
-  count             = length(data.aws_subnets.existing.ids) == 0 ? 2 : 0
-  vpc_id            = data.aws_vpc.existing.id
-  cidr_block        = "10.0.${count.index + 1}.0/24"
-  availability_zone = data.aws_availability_zones.available.names[count.index]
 
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "${var.project_name}-public-subnet-${count.index + 1}-${random_id.suffix.hex}"
-  }
+# Security Group
+data "aws_security_group" "TerraformSG" {
+id = "sg-0187dc5a4e31521a0"      
 }
 
-# Use existing subnets or newly created ones
-locals {
-  subnet_ids = length(data.aws_subnets.existing.ids) > 0 ? data.aws_subnets.existing.ids : aws_subnet.public[*].id
+# ECS role
+data "aws_iam_role" "existing_ecs_role" {
+  name = "ecsTaskExecutionRole"
 }
 
-# Internet Gateway (check if exists first)
-data "aws_internet_gateway" "existing" {
-  filter {
-    name   = "attachment.vpc-id"
-    values = [data.aws_vpc.existing.id]
-  }
+
+
+
+# CloudWatch Log Group 
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name              = "/ecs/${var.project_name}"
+  retention_in_days = 7
 }
 
-resource "aws_internet_gateway" "main" {
-  count  = data.aws_internet_gateway.existing.id != null ? 0 : 1
-  vpc_id = data.aws_vpc.existing.id
-
-  tags = {
-    Name = "${var.project_name}-igw-${random_id.suffix.hex}"
-  }
-}
-
-# Only create route table if we created new subnets
-resource "aws_route_table" "public" {
-  count  = length(data.aws_subnets.existing.ids) == 0 ? 1 : 0
-  vpc_id = data.aws_vpc.existing.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = data.aws_internet_gateway.existing.id != null ? data.aws_internet_gateway.existing.id : aws_internet_gateway.main[0].id
-  }
-
-  tags = {
-    Name = "${var.project_name}-public-rt-${random_id.suffix.hex}"
-  }
-}
-
-# Only create route table associations if we created new subnets
-resource "aws_route_table_association" "public" {
-  count          = length(data.aws_subnets.existing.ids) == 0 ? length(aws_subnet.public) : 0
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public[0].id
-}
-
-# Security Group for ALB
-resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-alb-sg-${random_id.suffix.hex}"
-  description = "Security group for ALB"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.project_name}-alb-sg"
-  }
-}
-
-# Security Group for ECS Tasks
-resource "aws_security_group" "ecs_tasks" {
-  name        = "${var.project_name}-ecs-tasks-sg-${random_id.suffix.hex}"
-  description = "Security group for ECS tasks"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.project_name}-ecs-tasks-sg"
-  }
-}
-
-# Application Load Balancer
-resource "aws_lb" "main" {
-  name               = "${var.project_name}-alb-${random_id.suffix.hex}"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = local.subnet_ids
-
-  tags = {
-    Name = "${var.project_name}-alb"
-  }
+# Load Balancer
+resource "aws_lb" "ECS_ALB" {
+name               = "ECS-TF-ALB"
+internal           = false
+load_balancer_type = "application"
+security_groups    = [data.aws_security_group.TerraformSG.id]
+subnets            = [
+    data.aws_subnet.existing_public.id,
+    data.aws_subnet.existing_public_2.id
+]
 }
 
 # Target Group
-resource "aws_lb_target_group" "app" {
-  name        = "${var.project_name}-tg-${random_id.suffix.hex}"
-  port        = 3000
-  protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.existing.id
-  target_type = "ip"
-
-  health_check {
+resource "aws_lb_target_group" "ECS_TG" {
+name     = "ECS-TF-TG"
+port     = 3000
+protocol = "HTTP"
+vpc_id   = data.aws_vpc.existing.id
+target_type ="ip" # required fpr fargate
+ health_check {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
     matcher             = "200"
-    path                = "/health"
+    path                = "/"
     port                = "traffic-port"
     protocol            = "HTTP"
     timeout             = 5
     unhealthy_threshold = 2
   }
-
-  tags = {
-    Name = "${var.project_name}-tg"
-  }
 }
 
-# Load Balancer Listener
-resource "aws_lb_listener" "app" {
-  load_balancer_arn = aws_lb.main.arn
-  port              = "80"
-  protocol          = "HTTP"
 
-  default_action {
+
+# Listener
+resource "aws_lb_listener" "ECS_ALB_Listener" {
+load_balancer_arn = aws_lb.ECS_ALB.arn
+port              = 80
+protocol          = "HTTP"
+default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
+    target_group_arn = aws_lb_target_group.ECS_TG.arn
   }
 }
 
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
-  name = "${var.project_name}-cluster-${random_id.suffix.hex}"
+name = "${var.project_name}-cluster"
+}
 
-  tags = {
-    Name = "${var.project_name}-cluster"
+
+# ECS Service
+resource "aws_ecs_service" "app" {
+name            = "${var.project_name}-service"
+cluster         = aws_ecs_cluster.main.id
+task_definition = aws_ecs_task_definition.app.arn
+desired_count   = 1
+launch_type     = "FARGATE"
+depends_on = [aws_lb_listener.ECS_ALB_Listener]
+
+network_configuration {
+    subnets         = [data.aws_subnet.existing_public.id]
+    security_groups = [data.aws_security_group.TerraformSG.id]
+    assign_public_ip = true
+    }
+load_balancer {
+    target_group_arn = aws_lb_target_group.ECS_TG.arn
+    container_name   = "app"
+    container_port   = 3000
   }
 }
 
-# ECS Task Definition
+
+
+
+#Task definition
+# Update this section in your task definition:
 resource "aws_ecs_task_definition" "app" {
-  family                   = "${var.project_name}-task-${random_id.suffix.hex}"
+  family                   = "${var.project_name}-task"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
-  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = data.aws_iam_role.existing_ecs_role.arn  # CHANGED
 
   container_definitions = jsonencode([
     {
-      name  = "${var.project_name}-container"
-      image = var.container_image
-
+      name      = "app"
+      image     = var.container_image
+      essential = true
       portMappings = [
         {
           containerPort = 3000
           protocol      = "tcp"
         }
       ]
-
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.ecs.name
+          awslogs-group         = aws_cloudwatch_log_group.ecs_logs.name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "ecs"
         }
       }
     }
   ])
-
-  tags = {
-    Name = "${var.project_name}-task"
-  }
-}
-
-# ECS Service
-resource "aws_ecs_service" "app" {
-  name            = "${var.project_name}-service-${random_id.suffix.hex}"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    security_groups  = [aws_security_group.ecs_tasks.id]
-    subnets          = local.subnet_ids
-    assign_public_ip = true
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.app.arn
-    container_name   = "${var.project_name}-container"
-    container_port   = 3000
-  }
-
-  depends_on = [aws_lb_listener.app]
-
-  tags = {
-    Name = "${var.project_name}-service"
-  }
-}
-
-# IAM Role for ECS Task Execution
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "${var.project_name}-ecs-role-${random_id.suffix.hex}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
-  role       = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-# CloudWatch Log Group
-resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${var.project_name}-${random_id.suffix.hex}"
-  retention_in_days = 7
-
-  tags = {
-    Name = "${var.project_name}-log-group"
-  }
-}
-
-# Data source for availability zones
-data "aws_availability_zones" "available" {
-  state = "available"
 }

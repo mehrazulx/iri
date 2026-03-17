@@ -14,3 +14,4 @@ variable "container_image" {
   description = "Docker image to run in the ECS cluster"
   type        = string
 }
+

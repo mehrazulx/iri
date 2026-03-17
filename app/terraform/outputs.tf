@@ -1,6 +1,6 @@
 output "load_balancer_url" {
   description = "URL of the load balancer"
-  value       = "http://${aws_lb.main.dns_name}"
+  value       = "http://${aws_lb.ECS_ALB.dns_name}"
 }
 
 output "ecs_cluster_name" {
@@ -12,3 +12,14 @@ output "ecs_service_name" {
   description = "Name of the ECS service"
   value       = aws_ecs_service.app.name
 }
+
+output "task_definition_arn" {
+  description = "ARN of the ECS task definition"
+  value       = aws_ecs_task_definition.app.arn
+}
+
+output "ecs_task_role_arn" {
+  description = "ARN of the ECS task role"
+  value       = data.aws_iam_role.existing_ecs_role.arn
+}
+
