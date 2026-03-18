@@ -1,3 +1,4 @@
+
 output "load_balancer_url" {
   description = "URL of the load balancer"
   value       = "http://${aws_lb.ECS_ALB.dns_name}"
@@ -18,8 +19,9 @@ output "task_definition_arn" {
   value       = aws_ecs_task_definition.app.arn
 }
 
+
 output "ecs_task_role_arn" {
-  description = "ARN of the ECS task role"
-  value       = data.aws_iam_role.existing_ecs_role.arn
+  value = aws_iam_role.existing_ecs_role.arn
 }
+
 
