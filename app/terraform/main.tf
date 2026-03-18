@@ -170,7 +170,7 @@ resource "aws_cloudwatch_log_group" "ecs_logs" {
 
 # Load Balancer
 resource "aws_lb" "ECS_ALB" {
-name               = "ECS-TF-ALB"
+name               = "ECS-ALB-NEW"
 internal           = false
 load_balancer_type = "application"
 security_groups    = [aws_security_group.app_sg.id]
@@ -182,7 +182,7 @@ subnets            = [
 
 # Target Group
 resource "aws_lb_target_group" "ECS_TG" {
-name     = "ECS-TF-TG"
+name     = "ECS-TG"
 port     = 3000
 protocol = "HTTP"
 vpc_id   = aws_vpc.existing.id
