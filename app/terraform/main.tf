@@ -162,6 +162,7 @@ data "aws_iam_policy_document" "ecs_assume_role" {
 
 
 
+
 # CloudWatch Log Group 
 resource "aws_cloudwatch_log_group" "ecs_logs" {
   name              = "/ecs/${var.project_name}"
